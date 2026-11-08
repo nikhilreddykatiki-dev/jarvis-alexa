@@ -744,11 +744,29 @@ class ToolExecutor:
 
                 news_results = query_rss(query)
                 if not news_results:
-                    # Strip conversational stop words if full sentence returned no news
-                    keywords = re.sub(r"\b(what|is|the|tell|me|about|can|you|where|who|when|how|much|are|why|did|it|and|to|from)\b", " ", lower_q)
+                    # 1. Normalize spelled-out number words (Alexa speech-to-text turns digits into words like "eighteen" -> "18")
+                    WORD_TO_NUM = {
+                        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+                        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+                        "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+                        "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+                        "eighteen": "18", "nineteen": "19", "twenty": "20"
+                    }
+                    normalized_q = lower_q
+                    for w, num in WORD_TO_NUM.items():
+                        normalized_q = re.sub(rf"\b{w}\b", num, normalized_q)
+
+                    # 2. Strip conversational stop words
+                    keywords = re.sub(r"\b(what|is|the|tell|me|about|can|you|where|who|when|how|much|are|why|did|it|and|to|from|of|a|an)\b", " ", normalized_q)
                     clean_kw = re.sub(r"\s+", " ", keywords).strip()
-                    if clean_kw and clean_kw != lower_q:
+                    if clean_kw:
                         news_results = query_rss(clean_kw)
+
+                    # 3. Product query fallback (e.g. "iphone 18 pro price")
+                    if not news_results and "iphone" in normalized_q:
+                        m_iphone = re.search(r"iphone\s*\d+\s*(?:pro\s*max|pro|plus)?", normalized_q)
+                        if m_iphone:
+                            news_results = query_rss(f"{m_iphone.group(0)} price")
 
                 if news_results:
                     return {

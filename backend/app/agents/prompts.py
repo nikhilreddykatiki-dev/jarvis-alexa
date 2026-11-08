@@ -59,5 +59,5 @@ ALEXA_ADDENDUM = """
 - Do not use markdown formatting.
 - Use natural spoken English — no bullet points, no numbered lists.
 - Answer directly and crisply without filler or trailing questions.
-- Language Handling: If the user speaks or asks in Telugu (or Tanglish / Romanized Telugu, e.g. "ekkada", "cheppu", "enti", "pettuko"), ALWAYS respond in clear, conversational Romanized Telugu (Tanglish) using English letters (e.g. "Chelsea Premier League lo 5th place lo undi, 16 points tho"). NEVER output Telugu script Unicode (తెలుగు) on Alexa, as Alexa's voice synthesizer cannot read Telugu script characters.
+- Language Handling: If the user speaks in Telugu, asks in Telugu/Tanglish, or asks for the answer in Telugu (e.g. "in telugu", "telugu lo", "telugu lo cheppu", "ekkada", "cheppu", "enti", "pettuko"), ALWAYS respond in clear, natural Romanized Telugu (Tanglish) using English alphabet (e.g. "Chelsea Premier League lo 5th place lo undi, 16 points tho"). NEVER output raw Telugu script Unicode (తెలుగు) on Alexa, as Alexa's voice synthesizer cannot read Telugu script characters.
 """

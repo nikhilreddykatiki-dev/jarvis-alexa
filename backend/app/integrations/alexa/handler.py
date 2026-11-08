@@ -67,7 +67,7 @@ def handle_alexa_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         elif intent_name == "AMAZON.FallbackIntent":
-            fallback_text = "I'm not quite sure how to help with that. Could you rephrase your question?"
+            fallback_text = "I didn't quite catch that. You can ask me questions, say 'set a timer for 5 minutes', or ask in Tanglish like 'cheppu Chelsea ekkada undi'."
             return build_response(
                 speech_text=fallback_text,
                 reprompt_text="How can I assist you?",

@@ -127,31 +127,16 @@ class JarvisAgent:
                 weather_res = tool_executor._tool_get_weather(loc)
                 grounding_info += f"\n## Live Weather Data for '{loc}':\n{json.dumps(weather_res)}\n"
 
-            # Check live events / current news / sports / facts / products / prices
-            search_cues = [
-                "where is", "who is", "who won", "when did", "did he", "did she",
-                "retire", "table", "standings", "score", "scores", "scorer",
-                "latest", "news", "today", "yesterday", "current", "top", "leader",
-                "stats", "player", "manager", "coach", "transfer", "record",
-                "price", "cost", "how much", "iphone", "release date", "launch",
-                "upgrade", "worth", "buy", "review", "vs", "versus", "specs", "difference"
-            ]
-            if any(cue in lower_msg for cue in search_cues) and not any(k in lower_msg for k in ["remind", "reminder", "task"]):
+            # Universal live web grounding for any informational question (sports, news, tech, products, facts)
+            is_action = any(k in lower_msg for k in ["remind", "reminder", "task", "set a timer", "delete memory", "clear memory"])
+            if not is_action and len(user_message.strip()) > 3:
                 search_res = tool_executor._tool_search_web(user_message, limit=5)
                 snippets = search_res.get("results", [])
                 if snippets:
                     formatted_snippets = []
                     for s in snippets:
                         if isinstance(s, dict):
-                            if "team" in s and "rank" in s:
-                                pts = f", Points: {s.get('points')}" if s.get('points') is not None else ""
-                                streak = f", Streak: {s.get('streak')}" if s.get('streak') else ""
-                                rec = s.get('record') or f"{s.get('wins', 0)}-{s.get('losses', 0)}"
-                                formatted_snippets.append(
-                                    f"- {s.get('team')}: Rank/Seed #{s.get('rank')}, Record: {rec}{pts}{streak}"
-                                )
-                            else:
-                                formatted_snippets.append(f"- {s.get('title', '')}: {s.get('snippet', '')}")
+                            formatted_snippets.append(f"- {s.get('title', '')}: {s.get('snippet', '')}")
                         else:
                             formatted_snippets.append(str(s))
                     grounding_info += f"\n## Live Data for '{user_message}':\n" + "\n".join(formatted_snippets) + "\n"

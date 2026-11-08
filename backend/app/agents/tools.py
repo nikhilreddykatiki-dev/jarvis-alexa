@@ -577,259 +577,58 @@ class ToolExecutor:
             return {"error": f"Could not retrieve weather: {str(e)}"}
 
     def _tool_search_web(self, query: str, limit: int = 5, **kwargs: Any) -> dict:
-        """Search the internet for real-time live data, standings, and facts without API keys."""
-        lower_q = query.lower()
+        """Universal, non-blocking web search engine for ANY topic (tech, sports, news, people, facts)."""
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        wiki_headers = {"User-Agent": "JarvisAssistant/1.0 (contact@jarvis.ai)"}
+        results = []
 
-        # ── 1. Universal Sports Standings (NBA, NFL, MLB, NHL, Soccer Leagues) ──
-        SPORTS_MAP = {
-            "nba": ("basketball", "nba"),
-            "wnba": ("basketball", "wnba"),
-            "nfl": ("football", "nfl"),
-            "mlb": ("baseball", "mlb"),
-            "nhl": ("hockey", "nhl"),
-            "premier league": ("soccer", "eng.1"),
-            "epl": ("soccer", "eng.1"),
-            "la liga": ("soccer", "esp.1"),
-            "laliga": ("soccer", "esp.1"),
-            "serie a": ("soccer", "ita.1"),
-            "bundesliga": ("soccer", "ger.1"),
-            "ligue 1": ("soccer", "fra.1"),
-            "champions league": ("soccer", "uefa.champions"),
-        }
-
-        TEAM_ALIASES = {
-            # NBA
-            "gsw": ("basketball", "nba", "Golden State Warriors"),
-            "warriors": ("basketball", "nba", "Golden State Warriors"),
-            "lakers": ("basketball", "nba", "Los Angeles Lakers"),
-            "celtics": ("basketball", "nba", "Boston Celtics"),
-            "bulls": ("basketball", "nba", "Chicago Bulls"),
-            "knicks": ("basketball", "nba", "New York Knicks"),
-            "heat": ("basketball", "nba", "Miami Heat"),
-            "bucks": ("basketball", "nba", "Milwaukee Bucks"),
-            "nuggets": ("basketball", "nba", "Denver Nuggets"),
-            "suns": ("basketball", "nba", "Phoenix Suns"),
-            "clippers": ("basketball", "nba", "LA Clippers"),
-            "mavericks": ("basketball", "nba", "Dallas Mavericks"),
-            "mavs": ("basketball", "nba", "Dallas Mavericks"),
-            "76ers": ("basketball", "nba", "Philadelphia 76ers"),
-            # NFL
-            "chiefs": ("football", "nfl", "Kansas City Chiefs"),
-            "eagles": ("football", "nfl", "Philadelphia Eagles"),
-            "cowboys": ("football", "nfl", "Dallas Cowboys"),
-            "49ers": ("football", "nfl", "San Francisco 49ers"),
-            # Soccer
-            "real madrid": ("soccer", "esp.1", "Real Madrid"),
-            "barcelona": ("soccer", "esp.1", "Barcelona"),
-            "barca": ("soccer", "esp.1", "Barcelona"),
-            "atletico": ("soccer", "esp.1", "Atlético Madrid"),
-            "man utd": ("soccer", "eng.1", "Manchester United"),
-            "manchester united": ("soccer", "eng.1", "Manchester United"),
-            "man city": ("soccer", "eng.1", "Manchester City"),
-            "arsenal": ("soccer", "eng.1", "Arsenal"),
-            "liverpool": ("soccer", "eng.1", "Liverpool"),
-            "chelsea": ("soccer", "eng.1", "Chelsea"),
-            "spurs": ("soccer", "eng.1", "Tottenham Hotspur"),
-            "tottenham": ("soccer", "eng.1", "Tottenham Hotspur"),
-            "bayern": ("soccer", "ger.1", "Bayern Munich"),
-            "dortmund": ("soccer", "ger.1", "Borussia Dortmund"),
-            "juventus": ("soccer", "ita.1", "Juventus"),
-            "inter milan": ("soccer", "ita.1", "Internazionale"),
-            "psg": ("soccer", "fra.1", "Paris Saint-Germain"),
-        }
-
-        # ── 1. Standings Interceptor (ESPN API) ──
-        # ONLY trigger if the query explicitly asks for standings / table / rank / seed / position
-        standings_keywords = [
-            "table", "standing", "standings", "position", "positions",
-            "rank", "ranks", "ranking", "rankings", "seed", "seeds",
-            "seeded", "points table", "playoff picture"
-        ]
-        is_standings_query = any(k in lower_q for k in standings_keywords) or (
-            any(w in lower_q for w in ["where is", "where are"]) and any(lg in lower_q for lg in SPORTS_MAP)
-        )
-
-        sport_league = None
-        target_team = None
-
-        if is_standings_query:
-            for alias, val in TEAM_ALIASES.items():
-                if alias in lower_q:
-                    sport_league = (val[0], val[1])
-                    target_team = val[2]
-                    break
-
-            if not sport_league:
-                for lk, val in SPORTS_MAP.items():
-                    if lk in lower_q:
-                        sport_league = val
-                        break
-
-        if sport_league:
-            try:
-                sport, lg = sport_league
-                with httpx.Client(timeout=2.0) as client:
-                    espn_url = f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings"
-                    resp = client.get(espn_url, headers=headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        entries = []
-                        def extract_entries(node):
-                            if isinstance(node, dict):
-                                if "standings" in node and "entries" in node["standings"]:
-                                    entries.extend(node["standings"]["entries"])
-                                for v in node.values():
-                                    extract_entries(v)
-                            elif isinstance(node, list):
-                                for item in node:
-                                    extract_entries(item)
-
-                        extract_entries(data.get("children", []))
-                        table_data = []
-                        for e in entries:
-                            t_name = e.get("team", {}).get("displayName", "")
-                            st = {s.get("name"): s.get("displayValue") for s in e.get("stats", [])}
-                            table_data.append({
-                                "rank": st.get("playoffSeed") or st.get("rank"),
-                                "team": t_name,
-                                "played": st.get("gamesPlayed"),
-                                "wins": st.get("wins"),
-                                "losses": st.get("losses"),
-                                "streak": st.get("streak", ""),
-                                "record": st.get("overall", f"{st.get('wins', 0)}-{st.get('losses', 0)}"),
-                                "points": st.get("points"),
-                            })
-                        if target_team:
-                            matched = [t for t in table_data if target_team.lower() in t["team"].lower()]
-                            if matched:
-                                return {
-                                    "query": query,
-                                    "source": f"ESPN {lg.upper()} Live Feed",
-                                    "results": matched,
-                                    "top_teams": table_data[:5]
-                                }
-                        if table_data:
-                            return {
-                                "query": query,
-                                "source": f"ESPN {lg.upper()} Live Feed",
-                                "results": table_data,
-                            }
-            except Exception as e:
-                logger.warning(f"ESPN Standings lookup error: {e}")
-
-        # ── 2. Real-Time News & Announcements (Google News RSS Feed) ──
-        # Ultra-fast (~200ms), never blocked by cloud datacenters, covers live product launches, tech, prices, and events
+        # 1. Live Real-Time News & Current Facts (Google News RSS: ~200ms, never blocked)
         try:
             with httpx.Client(timeout=2.0) as client:
-                def query_rss(q_text: str):
-                    news_url = f"https://news.google.com/rss/search?q={quote_plus(q_text)}"
-                    n_resp = client.get(news_url, headers=headers, follow_redirects=True)
-                    if n_resp.status_code == 200:
-                        root = ET.fromstring(n_resp.text)
-                        items = root.findall('.//item')
-                        if items:
-                            res = []
-                            for it in items[:5]:
-                                title = it.find('title').text if it.find('title') is not None else ""
-                                pdate = it.find('pubDate').text if it.find('pubDate') is not None else ""
-                                if title:
-                                    res.append({
-                                        "title": title,
-                                        "published": pdate,
-                                        "snippet": f"Published: {pdate}. Headline: {title}"
-                                    })
-                            return res
-                    return []
-
-                news_results = query_rss(query)
-                if not news_results:
-                    # 1. Normalize spelled-out number words (Alexa speech-to-text turns digits into words like "eighteen" -> "18")
-                    WORD_TO_NUM = {
-                        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-                        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
-                        "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
-                        "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
-                        "eighteen": "18", "nineteen": "19", "twenty": "20"
-                    }
-                    normalized_q = lower_q
-                    for w, num in WORD_TO_NUM.items():
-                        normalized_q = re.sub(rf"\b{w}\b", num, normalized_q)
-
-                    # 2. Strip conversational stop words
-                    keywords = re.sub(r"\b(what|is|the|tell|me|about|can|you|where|who|when|how|much|are|why|did|it|and|to|from|of|a|an)\b", " ", normalized_q)
-                    clean_kw = re.sub(r"\s+", " ", keywords).strip()
-                    if clean_kw:
-                        news_results = query_rss(clean_kw)
-
-                    # 3. Product query fallback (e.g. "iphone 18 pro price")
-                    if not news_results and "iphone" in normalized_q:
-                        m_iphone = re.search(r"iphone\s*\d+\s*(?:pro\s*max|pro|plus)?", normalized_q)
-                        if m_iphone:
-                            news_results = query_rss(f"{m_iphone.group(0)} price")
-
-                if news_results:
-                    return {
-                        "query": query,
-                        "source": "Google News Live RSS",
-                        "results": news_results,
-                    }
+                resp = client.get(
+                    f"https://news.google.com/rss/search?q={quote_plus(query)}",
+                    headers=headers,
+                    follow_redirects=True,
+                )
+                if resp.status_code == 200:
+                    for it in ET.fromstring(resp.text).findall('.//item')[:limit]:
+                        title = it.findtext('title', '')
+                        pdate = it.findtext('pubDate', '')
+                        if title:
+                            results.append({"title": title, "snippet": f"{pdate}: {title}"})
         except Exception as e:
             logger.warning(f"Google News RSS error: {e}")
 
-        # ── 3. Fast Web Search via Wikipedia API & DuckDuckGo Fallback ──
-        try:
-            with httpx.Client(timeout=1.5) as client:
-                clean_results = []
-
-                # Wikipedia API with compliant User-Agent (instant response: ~150ms)
-                try:
-                    wiki_headers = {"User-Agent": "JarvisAlexaSkill/1.0 (contact@jarvis.ai)"}
-                    wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={quote_plus(query)}&format=json"
-                    w_resp = client.get(wiki_url, headers=wiki_headers, timeout=1.5)
+        # 2. Encyclopedic Knowledge & Entities (Wikipedia API: ~150ms, never blocked)
+        if len(results) < limit:
+            try:
+                with httpx.Client(timeout=1.5) as client:
+                    w_resp = client.get(
+                        f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={quote_plus(query)}&format=json",
+                        headers=wiki_headers,
+                    )
                     if w_resp.status_code == 200:
-                        w_items = w_resp.json().get("query", {}).get("search", [])
-                        for item in w_items[:limit]:
-                            clean_t = item.get("title", "")
-                            clean_s = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
-                            if clean_t or clean_s:
-                                clean_results.append({"title": f"Wikipedia: {clean_t}", "snippet": clean_s})
-                except Exception as e:
-                    logger.warning(f"Wikipedia API search error: {e}")
+                        for it in w_resp.json().get("query", {}).get("search", [])[:limit]:
+                            clean_s = re.sub(r"<[^>]+>", "", it.get("snippet", "")).strip()
+                            results.append({"title": it.get("title", ""), "snippet": clean_s})
+            except Exception as e:
+                logger.warning(f"Wikipedia search error: {e}")
 
-                if clean_results:
-                    return {"query": query, "results": clean_results}
-
-                # DuckDuckGo fallback with short 1.0s timeout
-                try:
-                    ddg_api = f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1&skip_disambig=1"
-                    resp = client.get(ddg_api, headers=headers, timeout=1.0)
-                    if resp.status_code == 200:
-                        abstract = resp.json().get("AbstractText", "")
+        # 3. DuckDuckGo Instant Answer API (~200ms)
+        if not results:
+            try:
+                with httpx.Client(timeout=1.5) as client:
+                    ddg_resp = client.get(
+                        f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1&skip_disambig=1",
+                        headers=headers,
+                    )
+                    if ddg_resp.status_code == 200:
+                        abstract = ddg_resp.json().get("AbstractText", "")
                         if abstract:
-                            return {"query": query, "summary": abstract, "source": resp.json().get("Heading", "DuckDuckGo")}
-                except Exception:
-                    pass
+                            results.append({"title": ddg_resp.json().get("Heading", "Overview"), "snippet": abstract})
+            except Exception as e:
+                logger.warning(f"DuckDuckGo API error: {e}")
 
-                try:
-                    html_url = "https://html.duckduckgo.com/html/"
-                    resp = client.post(html_url, headers=headers, data={"q": query}, timeout=1.0)
-                    if resp.status_code == 200:
-                        titles = re.findall(r'<h2 class="result__title">\s*<a[^>]*class="result__a"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
-                        snippets = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
-                        max_results = max(1, min(10, int(limit)))
-                        for t, s in zip(titles[:max_results], snippets[:max_results]):
-                            clean_t = re.sub(r"<[^>]+>", "", t).strip()
-                            clean_s = re.sub(r"<[^>]+>", "", s).strip()
-                            if clean_t or clean_s:
-                                clean_results.append({"title": clean_t, "snippet": clean_s})
-                except Exception:
-                    pass
-
-                if clean_results:
-                    return {"query": query, "results": clean_results}
-
-            return {"query": query, "message": "No external web results found. Use your general knowledge and logic to answer truthfully."}
-        except Exception as e:
-            logger.error(f"Web search error: {e}")
-            return {"error": f"Search failed: {str(e)}"}
+        if results:
+            return {"query": query, "results": results}
+        return {"query": query, "message": "No external web results found. Use your general knowledge and logic to answer truthfully."}

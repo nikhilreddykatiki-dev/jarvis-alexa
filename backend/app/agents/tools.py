@@ -669,7 +669,7 @@ class ToolExecutor:
         if sport_league:
             try:
                 sport, lg = sport_league
-                with httpx.Client(timeout=5.0) as client:
+                with httpx.Client(timeout=2.0) as client:
                     espn_url = f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings"
                     resp = client.get(espn_url, headers=headers)
                     if resp.status_code == 200:
@@ -722,7 +722,7 @@ class ToolExecutor:
         news_triggers = ["retire", "death", "died", "trade", "signed", "injury", "breaking", "news", "today", "yesterday", "latest", "announced"]
         if any(w in lower_q for w in news_triggers):
             try:
-                with httpx.Client(timeout=6.0) as client:
+                with httpx.Client(timeout=2.0) as client:
                     news_url = f"https://news.google.com/rss/search?q={quote_plus(query)}"
                     n_resp = client.get(news_url, headers=headers, follow_redirects=True)
                     if n_resp.status_code == 200:
@@ -750,46 +750,52 @@ class ToolExecutor:
 
         # ── 3. General Web Search via DuckDuckGo with deep article extraction ──
         try:
-            with httpx.Client(timeout=8.0) as client:
+            with httpx.Client(timeout=2.5) as client:
                 ddg_api = f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1&skip_disambig=1"
-                resp = client.get(ddg_api, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    abstract = data.get("AbstractText", "")
-                    if abstract:
-                        return {"query": query, "summary": abstract, "source": data.get("Heading", "DuckDuckGo")}
+                try:
+                    resp = client.get(ddg_api, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        abstract = data.get("AbstractText", "")
+                        if abstract:
+                            return {"query": query, "summary": abstract, "source": data.get("Heading", "DuckDuckGo")}
+                except Exception:
+                    pass
 
-                html_url = "https://html.duckduckgo.com/html/"
-                resp = client.post(html_url, headers=headers, data={"q": query})
-                if resp.status_code == 200:
-                    titles = re.findall(r'<h2 class="result__title">\s*<a[^>]*class="result__a"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
-                    snippets = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
-                    clean_results = []
-                    max_results = max(1, min(10, int(limit)))
-                    for t, s in zip(titles[:max_results], snippets[:max_results]):
-                        clean_t = re.sub(r"<[^>]+>", "", t).strip()
-                        clean_s = re.sub(r"<[^>]+>", "", s).strip()
-                        if clean_t or clean_s:
-                            clean_results.append({"title": clean_t, "snippet": clean_s})
+                clean_results = []
+                try:
+                    html_url = "https://html.duckduckgo.com/html/"
+                    resp = client.post(html_url, headers=headers, data={"q": query})
+                    if resp.status_code == 200:
+                        titles = re.findall(r'<h2 class="result__title">\s*<a[^>]*class="result__a"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
+                        snippets = re.findall(r'<a class="result__snippet"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
+                        max_results = max(1, min(10, int(limit)))
+                        for t, s in zip(titles[:max_results], snippets[:max_results]):
+                            clean_t = re.sub(r"<[^>]+>", "", t).strip()
+                            clean_s = re.sub(r"<[^>]+>", "", s).strip()
+                            if clean_t or clean_s:
+                                clean_results.append({"title": clean_t, "snippet": clean_s})
 
-                    # Deep read: Fetch actual text from top article URL
-                    raw_urls = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', resp.text)
-                    if not raw_urls:
-                        raw_urls = re.findall(r'<a[^>]+class="result__snippet"[^>]+href="([^"]+)"', resp.text)
-                    if raw_urls:
-                        m = re.search(r'uddg=([^&]+)', raw_urls[0])
-                        actual_url = unquote(m.group(1)) if m else raw_urls[0]
-                        if not actual_url.startswith("http"):
-                            actual_url = "https:" + actual_url
-                        try:
-                            page_resp = client.get(actual_url, follow_redirects=True, timeout=4.0, headers=headers)
-                            clean_page = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', page_resp.text, flags=re.DOTALL)
-                            clean_page = re.sub(r'<[^>]+>', ' ', clean_page)
-                            deep_text = re.sub(r'\s+', ' ', clean_page).strip()[:1000]
-                            if deep_text:
-                                clean_results.insert(0, {"title": "Top Article Body", "snippet": deep_text})
-                        except Exception:
-                            pass
+                        # Deep read: Fetch actual text from top article URL
+                        raw_urls = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', resp.text)
+                        if not raw_urls:
+                            raw_urls = re.findall(r'<a[^>]+class="result__snippet"[^>]+href="([^"]+)"', resp.text)
+                        if raw_urls:
+                            m = re.search(r'uddg=([^&]+)', raw_urls[0])
+                            actual_url = unquote(m.group(1)) if m else raw_urls[0]
+                            if not actual_url.startswith("http"):
+                                actual_url = "https:" + actual_url
+                            try:
+                                page_resp = client.get(actual_url, follow_redirects=True, timeout=1.5, headers=headers)
+                                clean_page = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', page_resp.text, flags=re.DOTALL)
+                                clean_page = re.sub(r'<[^>]+>', ' ', clean_page)
+                                deep_text = re.sub(r'\s+', ' ', clean_page).strip()[:1000]
+                                if deep_text:
+                                    clean_results.insert(0, {"title": "Top Article Body", "snippet": deep_text})
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.warning(f"DDG HTML search error: {e}")
 
                 # Fallback: DuckDuckGo Lite if HTML gave no results
                 if not clean_results:
@@ -825,7 +831,7 @@ class ToolExecutor:
                 if clean_results:
                     return {"query": query, "results": clean_results}
 
-            return {"query": query, "message": "No specific search results found."}
+            return {"query": query, "message": "No live search results found."}
         except Exception as e:
             logger.error(f"Web search error: {e}")
             return {"error": f"Search failed: {str(e)}"}

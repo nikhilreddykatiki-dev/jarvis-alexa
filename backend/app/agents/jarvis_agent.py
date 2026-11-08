@@ -156,13 +156,16 @@ class JarvisAgent:
                             formatted_snippets.append(str(s))
                     grounding_info += f"\n## Live Data for '{user_message}':\n" + "\n".join(formatted_snippets) + "\n"
 
+            active_tools = TOOL_DEFINITIONS
             if grounding_info:
                 messages[0]["content"] += f"\n{grounding_info}\nUse the live data above to answer the user truthfully and concisely."
+                # Avoid redundant second search round to guarantee sub-4s response for Alexa
+                active_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] != "search_web"]
 
             # Call Groq with tools
             response = self.groq.chat(
                 messages=messages,
-                tools=TOOL_DEFINITIONS,
+                tools=active_tools,
             )
 
             # Handle tool calls (multi-round)

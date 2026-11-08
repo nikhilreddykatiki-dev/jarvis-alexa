@@ -3,6 +3,7 @@
 import time
 import logging
 import re
+import json
 from typing import Optional
 from groq import Groq, APIError, RateLimitError, APIConnectionError, BadRequestError
 from backend.app.config import get_settings
@@ -40,10 +41,19 @@ class GroqProvider:
     @staticmethod
     def _parse_failed_tool_call(failed_gen: str) -> tuple[Optional[str], dict]:
         """Extract tool name and arguments from a malformed XML or JSON generation."""
+        TOOL_ALIASES = {
+            "search_and_browse": "search_web",
+            "web_search": "search_web",
+            "google_search": "search_web",
+            "browse": "search_web",
+            "search": "search_web",
+        }
+
         # 1. XML-style: <tool_call><function=name><parameter=key>value</parameter>...
         fn_match = re.search(r'<function=([a-zA-Z0-9_]+)>', failed_gen)
         if fn_match:
             fn_name = fn_match.group(1).strip()
+            fn_name = TOOL_ALIASES.get(fn_name, fn_name)
             param_matches = re.findall(
                 r'<\s*parameter=([a-zA-Z0-9_]+)\s*>\s*(.*?)\s*</parameter>',
                 failed_gen,
@@ -71,7 +81,8 @@ class GroqProvider:
             re.DOTALL,
         )
         if json_match:
-            fn_name = json_match.group(1)
+            fn_name = json_match.group(1).strip()
+            fn_name = TOOL_ALIASES.get(fn_name, fn_name)
             try:
                 args = json.loads(json_match.group(2))
                 return fn_name, args

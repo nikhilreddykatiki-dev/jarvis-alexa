@@ -286,13 +286,22 @@ TOOL_DEFINITIONS = [
 # Allowlist of executable tools
 ALLOWED_TOOLS = {t["function"]["name"] for t in TOOL_DEFINITIONS}
 
+TOOL_ALIASES = {
+    "search_and_browse": "search_web",
+    "web_search": "search_web",
+    "google_search": "search_web",
+    "browse": "search_web",
+    "search": "search_web",
+}
+
 
 def validate_tool_call(name: str, arguments: str) -> tuple[bool, str, dict]:
     """Validate a tool call against the allowlist and parse arguments.
     
     Returns (is_valid, error_message, parsed_args).
     """
-    if name not in ALLOWED_TOOLS:
+    canonical_name = TOOL_ALIASES.get(name, name)
+    if canonical_name not in ALLOWED_TOOLS:
         return False, f"Tool '{name}' is not allowed.", {}
 
     try:
@@ -312,13 +321,14 @@ class ToolExecutor:
 
     def execute(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
-        is_valid, error, args = validate_tool_call(tool_name, arguments)
+        canonical_name = TOOL_ALIASES.get(tool_name, tool_name)
+        is_valid, error, args = validate_tool_call(canonical_name, arguments)
         if not is_valid:
             return json.dumps({"error": error})
 
-        handler = getattr(self, f"_tool_{tool_name}", None)
+        handler = getattr(self, f"_tool_{canonical_name}", None)
         if handler is None:
-            return json.dumps({"error": f"No handler for tool '{tool_name}'"})
+            return json.dumps({"error": f"No handler for tool '{canonical_name}'"})
 
         try:
             sig = inspect.signature(handler)

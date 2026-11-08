@@ -127,12 +127,14 @@ class JarvisAgent:
                 weather_res = tool_executor._tool_get_weather(loc)
                 grounding_info += f"\n## Live Weather Data for '{loc}':\n{json.dumps(weather_res)}\n"
 
-            # Check live events / current news / sports / facts
+            # Check live events / current news / sports / facts / products / prices
             search_cues = [
                 "where is", "who is", "who won", "when did", "did he", "did she",
                 "retire", "table", "standings", "score", "scores", "scorer",
                 "latest", "news", "today", "yesterday", "current", "top", "leader",
-                "stats", "player", "manager", "coach", "transfer", "record"
+                "stats", "player", "manager", "coach", "transfer", "record",
+                "price", "cost", "how much", "iphone", "release date", "launch",
+                "upgrade", "worth", "buy", "review", "vs", "versus", "specs", "difference"
             ]
             if any(cue in lower_msg for cue in search_cues) and not any(k in lower_msg for k in ["remind", "reminder", "task"]):
                 search_res = tool_executor._tool_search_web(user_message, limit=5)

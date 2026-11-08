@@ -168,9 +168,10 @@ class JarvisAgent:
                 tools=active_tools,
             )
 
-            # Handle tool calls (multi-round)
+            # Handle tool calls (single round on Alexa to guarantee sub-3s response)
             rounds = 0
-            while response.get("tool_calls") and rounds < self.MAX_TOOL_ROUNDS:
+            max_rounds = 1 if self.is_alexa else self.MAX_TOOL_ROUNDS
+            while response.get("tool_calls") and rounds < max_rounds:
                 rounds += 1
                 assistant_msg = {"role": "assistant", "content": response["content"] or ""}
                 if response["tool_calls"]:
@@ -202,8 +203,8 @@ class JarvisAgent:
                     logger.info(f"Tool '{fn_name}' executed: {result[:200]}")
 
                 # Call Groq again to synthesize the answer
-                # Pass tools=None on round 1+ so model produces final text instead of looping
-                next_tools = TOOL_DEFINITIONS if rounds < 2 else None
+                # Pass tools=None on Alexa or final round so model produces final text immediately
+                next_tools = None if self.is_alexa else (TOOL_DEFINITIONS if rounds < 2 else None)
                 response = self.groq.chat(messages=messages, tools=next_tools)
 
             answer = (response.get("content") or "").strip()

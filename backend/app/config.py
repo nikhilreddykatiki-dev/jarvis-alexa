@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Groq AI
     groq_api_key: str = Field(default="", description="Groq API key")
     groq_model: str = Field(
-        default="openai/gpt-oss-120b",
+        default="llama-3.1-8b-instant",
         description="Groq model ID — check availability at console.groq.com",
     )
     groq_max_tokens: int = 1024

@@ -159,8 +159,8 @@ class JarvisAgent:
             active_tools = TOOL_DEFINITIONS
             if grounding_info:
                 messages[0]["content"] += f"\n{grounding_info}\nUse the live data above to answer the user truthfully and concisely."
-                # Avoid redundant second search round to guarantee sub-4s response for Alexa
-                active_tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] != "search_web"]
+                # Live data is already grounded; pass tools=None to guarantee instant final text synthesis
+                active_tools = None
 
             # Call Groq with tools
             response = self.groq.chat(

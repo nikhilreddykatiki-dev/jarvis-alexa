@@ -93,9 +93,30 @@ def handle_alexa_request(payload: dict[str, Any]) -> dict[str, Any]:
                 session_attributes=session_attributes,
             )
 
+        # Extract Alexa System context (device info, api endpoint, and security token)
+        system_context = payload.get("context", {}).get("System", {})
+        alexa_context = {
+            "apiEndpoint": system_context.get("apiEndpoint", "https://api.eu.amazonalexa.com"),
+            "apiAccessToken": system_context.get("apiAccessToken", ""),
+            "deviceId": system_context.get("device", {}).get("deviceId", ""),
+        }
+
         # Call Jarvis Agent
-        agent = JarvisAgent(user_id=user_id, session_id=session_id, is_alexa=True)
+        agent = JarvisAgent(
+            user_id=user_id,
+            session_id=session_id,
+            is_alexa=True,
+            alexa_context=alexa_context,
+        )
         response_text = agent.chat(user_query)
+
+        # Check if permission consent card is needed (e.g. for reminders or timers)
+        permissions = None
+        if alexa_context.get("permission_consent_required"):
+            permissions = [
+                "alexa::alerts:reminders:skill:readwrite",
+                "alexa::alerts:timers:skill:readwrite",
+            ]
 
         return build_response(
             speech_text=response_text,
@@ -103,6 +124,7 @@ def handle_alexa_request(payload: dict[str, Any]) -> dict[str, Any]:
             should_end_session=False,
             card_title="Jarvis",
             session_attributes=session_attributes,
+            permissions=permissions,
         )
 
     elif request_type == "SessionEndedRequest":

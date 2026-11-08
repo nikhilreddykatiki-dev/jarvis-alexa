@@ -92,6 +92,27 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "create_timer",
+            "description": "Start a countdown timer on the Alexa Echo Dot device. Use when the user asks for a timer or countdown.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration_seconds": {
+                        "type": "integer",
+                        "description": "Duration of the timer in seconds (e.g. 300 for 5 minutes).",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Short label for the timer, e.g. 'pasta' or 'tea'.",
+                    },
+                },
+                "required": ["duration_seconds"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_reminders",
             "description": "List the user's active reminders.",
             "parameters": {
@@ -315,9 +336,10 @@ def validate_tool_call(name: str, arguments: str) -> tuple[bool, str, dict]:
 class ToolExecutor:
     """Executes validated tool calls against the database."""
 
-    def __init__(self, db_session, user_id: str = "default"):
+    def __init__(self, db_session, user_id: str = "default", alexa_context: Optional[dict[str, Any]] = None):
         self.db = db_session
         self.user_id = user_id
+        self.alexa_context = alexa_context or {}
 
     def execute(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
@@ -428,13 +450,16 @@ class ToolExecutor:
         minutes_from_now: Optional[int] = None,
         **kwargs: Any,
     ) -> dict:
-        from datetime import timedelta
+        from datetime import timedelta, timezone
         from backend.app.models import Reminder
 
         calc_due = None
+        offset_sec = None
         if seconds_from_now is not None:
-            calc_due = datetime.now() + timedelta(seconds=int(seconds_from_now))
+            offset_sec = int(seconds_from_now)
+            calc_due = datetime.now() + timedelta(seconds=offset_sec)
         elif minutes_from_now is not None:
+            offset_sec = int(minutes_from_now) * 60
             calc_due = datetime.now() + timedelta(minutes=int(minutes_from_now))
         elif due_at:
             try:
@@ -449,7 +474,122 @@ class ToolExecutor:
         )
         self.db.add(reminder)
         self.db.commit()
-        return {"status": "created", "id": reminder.id, "title": title, "due_at": str(calc_due) if calc_due else None}
+
+        # Sync to physical Alexa Echo Dot hardware via Alexa Reminders API
+        alexa_sync = "saved_locally"
+        if self.alexa_context.get("apiAccessToken"):
+            api_endpoint = self.alexa_context.get("apiEndpoint", "https://api.eu.amazonalexa.com").rstrip("/")
+            token = self.alexa_context.get("apiAccessToken")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            req_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            alexa_payload = {
+                "requestTime": req_time,
+                "alertInfo": {
+                    "spokenInfo": {
+                        "content": [{
+                            "locale": "en-IN",
+                            "text": title,
+                        }]
+                    }
+                },
+                "pushNotification": {"status": "ENABLED"},
+            }
+            if offset_sec is not None:
+                alexa_payload["trigger"] = {
+                    "type": "SCHEDULED_RELATIVE",
+                    "offsetInSeconds": offset_sec,
+                }
+            elif calc_due:
+                alexa_payload["trigger"] = {
+                    "type": "SCHEDULED_ABSOLUTE",
+                    "scheduledTime": calc_due.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "timeZoneId": "Asia/Kolkata",
+                }
+
+            if "trigger" in alexa_payload:
+                try:
+                    with httpx.Client(timeout=2.5) as client:
+                        resp = client.post(f"{api_endpoint}/v1/alerts/reminders", json=alexa_payload, headers=headers)
+                        if resp.status_code in (200, 201):
+                            alexa_sync = "synced_to_echo_dot"
+                        elif resp.status_code in (401, 403):
+                            alexa_sync = "permission_consent_required"
+                            self.alexa_context["permission_consent_required"] = True
+                        else:
+                            logger.warning(f"Alexa Reminders API returned {resp.status_code}: {resp.text}")
+                            alexa_sync = f"api_status_{resp.status_code}"
+                except Exception as e:
+                    logger.warning(f"Alexa Reminders API error: {e}")
+                    alexa_sync = f"error_{e}"
+
+        return {
+            "status": "created",
+            "id": reminder.id,
+            "title": title,
+            "due_at": str(calc_due) if calc_due else None,
+            "echo_dot_sync": alexa_sync,
+        }
+
+    def _tool_create_timer(
+        self,
+        duration_seconds: int,
+        label: str = "Timer",
+        **kwargs: Any,
+    ) -> dict:
+        """Create and start a countdown timer on the Alexa Echo device."""
+        alexa_sync = "local_only"
+        if self.alexa_context.get("apiAccessToken"):
+            api_endpoint = self.alexa_context.get("apiEndpoint", "https://api.eu.amazonalexa.com").rstrip("/")
+            token = self.alexa_context.get("apiAccessToken")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "duration": f"PT{int(duration_seconds)}S",
+                "timerLabel": label or "Timer",
+                "creationBehavior": {
+                    "display": {
+                        "title": label or "Timer"
+                    }
+                },
+                "triggeringBehavior": {
+                    "operation": {
+                        "type": "ANNOUNCE",
+                        "textToAnnounce": [{
+                            "locale": "en-IN",
+                            "text": f"Your timer for {label or 'timer'} is done"
+                        }]
+                    },
+                    "notificationConfig": {
+                        "playAudio": True
+                    }
+                }
+            }
+            try:
+                with httpx.Client(timeout=2.5) as client:
+                    resp = client.post(f"{api_endpoint}/v1/alerts/timers", json=payload, headers=headers)
+                    if resp.status_code in (200, 201):
+                        alexa_sync = "started_on_echo_dot"
+                    elif resp.status_code in (401, 403):
+                        alexa_sync = "permission_consent_required"
+                        self.alexa_context["permission_consent_required"] = True
+                    else:
+                        logger.warning(f"Alexa Timers API returned {resp.status_code}: {resp.text}")
+                        alexa_sync = f"api_status_{resp.status_code}"
+            except Exception as e:
+                logger.warning(f"Alexa Timers API error: {e}")
+                alexa_sync = f"error_{e}"
+
+        return {
+            "status": "created",
+            "duration_seconds": duration_seconds,
+            "label": label,
+            "echo_dot_sync": alexa_sync,
+        }
 
     def _tool_list_reminders(self, include_done: bool = False) -> dict:
         from backend.app.models import Reminder

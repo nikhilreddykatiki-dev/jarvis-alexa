@@ -23,10 +23,17 @@ class JarvisAgent:
     MAX_TOOL_ROUNDS = 3  # Prevent infinite tool loops
     MAX_CONTEXT_MESSAGES = 20  # Keep context window manageable
 
-    def __init__(self, user_id: str = "default", session_id: Optional[str] = None, is_alexa: bool = False):
+    def __init__(
+        self,
+        user_id: str = "default",
+        session_id: Optional[str] = None,
+        is_alexa: bool = False,
+        alexa_context: Optional[dict] = None,
+    ):
         self.user_id = user_id
         self.session_id = session_id or str(uuid.uuid4())
         self.is_alexa = is_alexa
+        self.alexa_context = alexa_context or {}
         self.groq = GroqProvider()
         self.settings = get_settings()
 
@@ -101,7 +108,7 @@ class JarvisAgent:
             # Save user message
             self._save_message(db, "user", user_message)
 
-            tool_executor = ToolExecutor(db, self.user_id)
+            tool_executor = ToolExecutor(db, self.user_id, alexa_context=self.alexa_context)
 
             # Auto-grounding: Check if query relates to current facts, sports, news, or weather
             lower_msg = user_message.lower()
@@ -127,8 +134,15 @@ class JarvisAgent:
                 weather_res = tool_executor._tool_get_weather(loc)
                 grounding_info += f"\n## Live Weather Data for '{loc}':\n{json.dumps(weather_res)}\n"
 
+            # Check if request is an action (timer, reminder, alarm, memory, task, or Telugu action words)
+            action_keywords = [
+                "timer", "alarm", "countdown", "stopwatch", "pettuko",
+                "remind", "reminder", "gurthu", "task", "todo", "to-do",
+                "delete memory", "clear memory", "remember that", "remember this",
+            ]
+            is_action = any(k in lower_msg for k in action_keywords)
+
             # Universal live web grounding for any informational question (sports, news, tech, products, facts)
-            is_action = any(k in lower_msg for k in ["remind", "reminder", "task", "set a timer", "delete memory", "clear memory"])
             if not is_action and len(user_message.strip()) > 3:
                 search_res = tool_executor._tool_search_web(user_message, limit=5)
                 snippets = search_res.get("results", [])

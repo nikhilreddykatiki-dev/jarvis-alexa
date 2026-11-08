@@ -10,6 +10,7 @@ def build_response(
     card_title: Optional[str] = None,
     session_attributes: Optional[dict] = None,
     use_ssml: bool = False,
+    permissions: Optional[list[str]] = None,
 ) -> dict:
     """Construct an Alexa skill response object compliant with ASK specification."""
     output_speech: dict[str, Any] = {}
@@ -25,7 +26,12 @@ def build_response(
         "shouldEndSession": should_end_session,
     }
 
-    if card_title:
+    if permissions:
+        response["card"] = {
+            "type": "AskForPermissionsConsent",
+            "permissions": permissions,
+        }
+    elif card_title:
         response["card"] = {
             "type": "Simple",
             "title": card_title,

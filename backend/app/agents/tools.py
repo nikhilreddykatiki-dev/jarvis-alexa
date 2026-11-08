@@ -800,7 +800,7 @@ class ToolExecutor:
                 if clean_results:
                     return {"query": query, "results": clean_results}
 
-            return {"query": query, "message": "No live search results found."}
+            return {"query": query, "message": "No external web results found. Use your general knowledge and logic to answer truthfully."}
         except Exception as e:
             logger.error(f"Web search error: {e}")
             return {"error": f"Search failed: {str(e)}"}

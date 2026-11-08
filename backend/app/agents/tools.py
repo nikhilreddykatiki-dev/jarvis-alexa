@@ -577,12 +577,113 @@ class ToolExecutor:
             return {"error": f"Could not retrieve weather: {str(e)}"}
 
     def _tool_search_web(self, query: str, limit: int = 5, **kwargs: Any) -> dict:
-        """Universal, non-blocking web search engine for ANY topic (tech, sports, news, people, facts)."""
+        """Universal, non-blocking web search engine for ANY topic (sports, tech, news, facts)."""
+        lower_q = query.lower()
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         wiki_headers = {"User-Agent": "JarvisAssistant/1.0 (contact@jarvis.ai)"}
         results = []
 
-        # 1. Live Real-Time News & Current Facts (Google News RSS: ~200ms, never blocked)
+        # ── 1. Live Sports Standings (ESPN API) ──
+        # Runs when query explicitly asks about a league or team standing/table
+        LEAGUES = {
+            "premier league": ("soccer", "eng.1"),
+            "epl": ("soccer", "eng.1"),
+            "la liga": ("soccer", "esp.1"),
+            "laliga": ("soccer", "esp.1"),
+            "serie a": ("soccer", "ita.1"),
+            "bundesliga": ("soccer", "ger.1"),
+            "ligue 1": ("soccer", "fra.1"),
+            "nba": ("basketball", "nba"),
+            "nfl": ("football", "nfl"),
+            "mlb": ("baseball", "mlb"),
+            "nhl": ("hockey", "nhl"),
+        }
+
+        TEAM_TO_LEAGUE = {
+            "chelsea": ("soccer", "eng.1", "Chelsea"),
+            "man utd": ("soccer", "eng.1", "Manchester United"),
+            "manchester united": ("soccer", "eng.1", "Manchester United"),
+            "man city": ("soccer", "eng.1", "Manchester City"),
+            "arsenal": ("soccer", "eng.1", "Arsenal"),
+            "liverpool": ("soccer", "eng.1", "Liverpool"),
+            "tottenham": ("soccer", "eng.1", "Tottenham Hotspur"),
+            "spurs": ("soccer", "eng.1", "Tottenham Hotspur"),
+            "real madrid": ("soccer", "esp.1", "Real Madrid"),
+            "barcelona": ("soccer", "esp.1", "Barcelona"),
+            "barca": ("soccer", "esp.1", "Barcelona"),
+            "atletico": ("soccer", "esp.1", "Atlético Madrid"),
+            "juventus": ("soccer", "ita.1", "Juventus"),
+            "inter milan": ("soccer", "ita.1", "Internazionale"),
+            "bayern": ("soccer", "ger.1", "Bayern Munich"),
+            "dortmund": ("soccer", "ger.1", "Borussia Dortmund"),
+            "psg": ("soccer", "fra.1", "Paris Saint-Germain"),
+            "gsw": ("basketball", "nba", "Golden State Warriors"),
+            "warriors": ("basketball", "nba", "Golden State Warriors"),
+            "lakers": ("basketball", "nba", "Los Angeles Lakers"),
+            "celtics": ("basketball", "nba", "Boston Celtics"),
+        }
+
+        is_standings_query = any(k in lower_q for k in ["table", "standing", "standings", "position", "rank", "seed", "where is", "where are", "place in"])
+        sport_league = None
+        target_team = None
+
+        league_name = "League"
+        if is_standings_query:
+            for lk, val in LEAGUES.items():
+                if lk in lower_q:
+                    sport_league = val
+                    league_name = lk.title()
+                    break
+            for t_alias, t_info in TEAM_TO_LEAGUE.items():
+                if t_alias in lower_q:
+                    if not sport_league:
+                        sport_league = (t_info[0], t_info[1])
+                        league_name = t_info[1].upper()
+                    target_team = t_info[2]
+                    break
+
+        if sport_league:
+            try:
+                sport, lg = sport_league
+                with httpx.Client(timeout=2.0) as client:
+                    espn_url = f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings"
+                    resp = client.get(espn_url, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        entries = []
+                        def extract_entries(node):
+                            if isinstance(node, dict):
+                                if "standings" in node and "entries" in node["standings"]:
+                                    entries.extend(node["standings"]["entries"])
+                                for v in node.values():
+                                    extract_entries(v)
+                            elif isinstance(node, list):
+                                for item in node:
+                                    extract_entries(item)
+
+                        extract_entries(data)
+                        for idx, e in enumerate(entries):
+                            t_name = e.get("team", {}).get("displayName", "")
+                            st = {s.get("name"): s.get("displayValue") for s in e.get("stats", [])}
+                            rank = st.get("playoffSeed") or st.get("rank") or (idx + 1)
+                            pts = st.get("points")
+                            record = st.get("overall", f"{st.get('wins', 0)}-{st.get('losses', 0)}")
+                            if target_team and target_team.lower() in t_name.lower():
+                                pts_str = f", {pts} Points" if pts is not None else ""
+                                results.insert(0, {
+                                    "title": f"Live Standings: {t_name}",
+                                    "snippet": f"{t_name} is currently ranked #{rank} in the {league_name} standings with a record of {record}{pts_str}."
+                                })
+                                break
+                            elif not target_team and len(results) < 5:
+                                results.append({
+                                    "title": f"{t_name}",
+                                    "snippet": f"Rank #{rank}, Record: {record}"
+                                })
+            except Exception as e:
+                logger.warning(f"Live Standings lookup error: {e}")
+
+        # ── 2. Live Real-Time News & Current Facts (Google News RSS: ~200ms) ──
         try:
             with httpx.Client(timeout=2.0) as client:
                 resp = client.get(
@@ -599,7 +700,7 @@ class ToolExecutor:
         except Exception as e:
             logger.warning(f"Google News RSS error: {e}")
 
-        # 2. Encyclopedic Knowledge & Entities (Wikipedia API: ~150ms, never blocked)
+        # ── 3. Encyclopedic Knowledge & Entities (Wikipedia API: ~150ms) ──
         if len(results) < limit:
             try:
                 with httpx.Client(timeout=1.5) as client:
@@ -614,7 +715,7 @@ class ToolExecutor:
             except Exception as e:
                 logger.warning(f"Wikipedia search error: {e}")
 
-        # 3. DuckDuckGo Instant Answer API (~200ms)
+        # ── 4. DuckDuckGo Instant Answer API (~200ms) ──
         if not results:
             try:
                 with httpx.Client(timeout=1.5) as client:

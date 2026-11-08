@@ -718,35 +718,46 @@ class ToolExecutor:
             except Exception as e:
                 logger.warning(f"ESPN Standings lookup error: {e}")
 
-        # ── 2. Real-Time News (Google News RSS Feed) for breaking & recent queries ──
-        news_triggers = ["retire", "death", "died", "trade", "signed", "injury", "breaking", "news", "today", "yesterday", "latest", "announced"]
-        if any(w in lower_q for w in news_triggers):
-            try:
-                with httpx.Client(timeout=2.0) as client:
-                    news_url = f"https://news.google.com/rss/search?q={quote_plus(query)}"
+        # ── 2. Real-Time News & Announcements (Google News RSS Feed) ──
+        # Ultra-fast (~200ms), never blocked by cloud datacenters, covers live product launches, tech, prices, and events
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                def query_rss(q_text: str):
+                    news_url = f"https://news.google.com/rss/search?q={quote_plus(q_text)}"
                     n_resp = client.get(news_url, headers=headers, follow_redirects=True)
                     if n_resp.status_code == 200:
                         root = ET.fromstring(n_resp.text)
                         items = root.findall('.//item')
                         if items:
-                            news_results = []
+                            res = []
                             for it in items[:5]:
                                 title = it.find('title').text if it.find('title') is not None else ""
                                 pdate = it.find('pubDate').text if it.find('pubDate') is not None else ""
                                 if title:
-                                    news_results.append({
+                                    res.append({
                                         "title": title,
                                         "published": pdate,
                                         "snippet": f"Published: {pdate}. Headline: {title}"
                                     })
-                            if news_results:
-                                return {
-                                    "query": query,
-                                    "source": "Google News Live RSS",
-                                    "results": news_results,
-                                }
-            except Exception as e:
-                logger.warning(f"Google News RSS error: {e}")
+                            return res
+                    return []
+
+                news_results = query_rss(query)
+                if not news_results:
+                    # Strip conversational stop words if full sentence returned no news
+                    keywords = re.sub(r"\b(what|is|the|tell|me|about|can|you|where|who|when|how|much|are|why|did|it|and|to|from)\b", " ", lower_q)
+                    clean_kw = re.sub(r"\s+", " ", keywords).strip()
+                    if clean_kw and clean_kw != lower_q:
+                        news_results = query_rss(clean_kw)
+
+                if news_results:
+                    return {
+                        "query": query,
+                        "source": "Google News Live RSS",
+                        "results": news_results,
+                    }
+        except Exception as e:
+            logger.warning(f"Google News RSS error: {e}")
 
         # ── 3. Fast Web Search via Wikipedia API & DuckDuckGo Fallback ──
         try:
